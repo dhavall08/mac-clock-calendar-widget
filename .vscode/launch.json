@@ -1,0 +1,44 @@
+{
+  "configurations": [
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:mac-clock-calendar-widget}",
+      "name": "Debug NebulaWidgets",
+      "target": "NebulaWidgets",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug NebulaWidgets"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:mac-clock-calendar-widget}",
+      "name": "Release NebulaWidgets",
+      "target": "NebulaWidgets",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release NebulaWidgets"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:mac-clock-calendar-widget}",
+      "name": "Debug ClockAndCalendar",
+      "target": "ClockAndCalendar",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug ClockAndCalendar"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:mac-clock-calendar-widget}",
+      "name": "Release ClockAndCalendar",
+      "target": "ClockAndCalendar",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release ClockAndCalendar"
+    }
+  ]
+}
