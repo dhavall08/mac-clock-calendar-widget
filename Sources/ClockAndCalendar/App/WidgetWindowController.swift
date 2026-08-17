@@ -14,6 +14,7 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
     private var cancellables: Set<AnyCancellable> = []
     /// Suppresses `windowDidMove` bookkeeping while we're the ones moving it.
     private var isApplyingGeometry = false
+    private var reorderWorkItem: DispatchWorkItem?
 
     var onOpenSettings: ((UUID) -> Void)?
 
@@ -33,6 +34,20 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
             .publisher(for: NSApplication.didChangeScreenParametersNotification)
             .sink { [weak self] _ in self?.syncAll() }
             .store(in: &cancellables)
+
+        // Finder re-fronts its desktop window when it activates (a click on the
+        // wallpaper does it) and when the active Space changes. Desktop-layer
+        // widgets share that window level, so they can end up behind it — see
+        // `reassertDesktopOrdering`.
+        for name: NSNotification.Name in [
+            NSWorkspace.didActivateApplicationNotification,
+            NSWorkspace.activeSpaceDidChangeNotification
+        ] {
+            NSWorkspace.shared.notificationCenter
+                .publisher(for: name)
+                .sink { [weak self] _ in self?.scheduleDesktopReorder() }
+                .store(in: &cancellables)
+        }
     }
 
     // MARK: Sync
@@ -84,6 +99,13 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
         isApplyingGeometry = true
         defer { isApplyingGeometry = false }
 
+        // Layering and click handling don't depend on the size negotiation below,
+        // and step 2 can bail out of this method early — so settle them first. A
+        // panel left click-through because we returned before this line is the
+        // one failure mode the user can't undo from the widget itself.
+        panel.level = level(for: chrome.layer)
+        panel.ignoresMouseEvents = chrome.isLocked
+
         // The shell keeps a transparent margin for its toolbar, grip and glow.
         var size = WidgetShellMetrics.windowSize(for: state.renderedSize(for: id))
 
@@ -99,7 +121,10 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
         //    unplugged) would hang off the screen — pull it back in.
         let limit = state.maxScale(for: id)
         if chrome.scale > limit + 0.001 {
-            var clamped = chrome
+            // Re-read rather than mutating the local copy: `recordOrigin` above
+            // may have just moved this instance, and `chrome` still holds the
+            // pre-move origin — writing it back would undo the placement.
+            var clamped = state.chrome(for: id)
             clamped.scale = limit
             state.updateChrome(id, clamped)   // re-enters sync with the new size
             return
@@ -108,17 +133,44 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
         size = WidgetShellMetrics.windowSize(for: state.renderedSize(for: id))
         let frame = NSRect(x: topLeft.x, y: topLeft.y - size.height, width: size.width, height: size.height)
         panel.setFrame(frame, display: true)
-
-        panel.level = level(for: chrome.layer)
-        panel.ignoresMouseEvents = chrome.isLocked
         panel.orderFront(nil)
     }
 
     private func level(for layer: WidgetLayer) -> NSWindow.Level {
         switch layer {
-        case .desktop: NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)))
+        // One above the desktop icon window, not level with it: Finder's desktop
+        // lives at that exact level, and two windows in the same level are
+        // ordered by whoever was fronted last. Losing that race hands our clicks
+        // to the desktop, which looks exactly like the widget having locked
+        // itself. +1 is still ~2.1 billion levels below `.normal`, so the widget
+        // stays behind every app window as "On desktop" promises.
+        case .desktop: NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
         case .normal: .normal
         case .floating: .floating
+        }
+    }
+
+    // MARK: Desktop ordering
+
+    /// Coalesces reorder requests and runs them a beat late: the workspace
+    /// notifications fire *before* Finder finishes restacking the desktop, so
+    /// ordering front immediately would be undone again.
+    private func scheduleDesktopReorder() {
+        reorderWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.reassertDesktopOrdering() }
+        reorderWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: item)
+    }
+
+    /// Puts desktop-layer widgets back at the front of their own window level.
+    ///
+    /// Only `.desktop` panels need this. `.normal` must keep its place in the
+    /// regular stacking order (fronting it would make it behave like
+    /// "Always on top"), and `.floating` is already above everything.
+    private func reassertDesktopOrdering() {
+        for (id, panel) in panels where state.instance(id)?.chrome.layer == .desktop {
+            guard panel.isVisible else { continue }
+            panel.orderFront(nil)
         }
     }
 
