@@ -15,6 +15,7 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
     /// Suppresses `windowDidMove` bookkeeping while we're the ones moving it.
     private var isApplyingGeometry = false
     private var reorderWorkItem: DispatchWorkItem?
+    private var screenResyncItems: [DispatchWorkItem] = []
 
     var onOpenSettings: ((UUID) -> Void)?
 
@@ -32,8 +33,23 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
 
         NotificationCenter.default
             .publisher(for: NSApplication.didChangeScreenParametersNotification)
-            .sink { [weak self] _ in self?.syncAll() }
+            .sink { [weak self] _ in self?.scheduleScreenResync() }
             .store(in: &cancellables)
+
+        // Waking and unlocking both re-attach displays without necessarily
+        // changing the screen parameters afterwards, so they need their own
+        // nudge: a monitor that was asleep can report the wrong resolution (or
+        // be missing) at the moment the screens *do* change.
+        for name: NSNotification.Name in [
+            NSWorkspace.didWakeNotification,
+            NSWorkspace.sessionDidBecomeActiveNotification,
+            NSWorkspace.screensDidWakeNotification
+        ] {
+            NSWorkspace.shared.notificationCenter
+                .publisher(for: name)
+                .sink { [weak self] _ in self?.scheduleScreenResync() }
+                .store(in: &cancellables)
+        }
 
         // Finder re-fronts its desktop window when it activates (a click on the
         // wallpaper does it) and when the active Space changes. Desktop-layer
@@ -48,11 +64,38 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
                 .sink { [weak self] _ in self?.scheduleDesktopReorder() }
                 .store(in: &cancellables)
         }
+
+        // At login the app is started by a LaunchAgent, which can win the race
+        // against the window server finishing its display setup. If a monitor
+        // shows up a second later it posts screen parameters and we'd catch it
+        // anyway, but a display that was merely *slow* to be reported posts
+        // nothing — so re-place everything once things have settled.
+        scheduleScreenResync()
     }
 
     // MARK: Sync
 
+    /// Re-places every widget after the set of displays changed.
+    ///
+    /// Display reconfiguration arrives as a burst of notifications, and the
+    /// screen list is briefly untrustworthy in the middle of it — a display
+    /// coming back can be absent, or report its pre-wake resolution, for a beat
+    /// or two. So: coalesce, then check again as the dust settles. `syncAll` is
+    /// idempotent, so the repeats cost nothing once the layout is right.
+    private func scheduleScreenResync() {
+        for item in screenResyncItems { item.cancel() }
+        screenResyncItems = [0.35, 1.2, 3.0].map { delay in
+            let item = DispatchWorkItem { [weak self] in self?.syncAll() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+            return item
+        }
+    }
+
     func syncAll() {
+        // Mid-reconfiguration (and while every display sleeps) AppKit can report
+        // no screens at all. Placing widgets against that would scatter them; the
+        // burst above will call back once there's a real layout to place them on.
+        guard !NSScreen.screens.isEmpty else { return }
         for instance in state.instances { sync(instance.id) }
         // Tear down panels for instances that no longer exist.
         let live = Set(state.instances.map(\.id))
@@ -109,24 +152,45 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
         // The shell keeps a transparent margin for its toolbar, grip and glow.
         var size = WidgetShellMetrics.windowSize(for: state.renderedSize(for: id))
 
-        // 1. Settle on a position first: `maxScale` needs to know which display
-        //    the widget is on before it can decide what "too big" means.
-        let topLeft = resolvedTopLeft(chrome: chrome, size: size, id: id)
+        // 1. Decide which display this widget belongs on, and where on it. This
+        //    only needs `size` as a rough on-screen test, so it can run before
+        //    the size is finally settled below.
+        let target = resolvedPlacement(chrome: chrome, size: size, id: id)
+
+        // 2. If we're restoring a remembered placement, restore the size the
+        //    widget had there too — a stint on a smaller display may have shrunk
+        //    it. Do this before positioning, since everything below measures
+        //    against the rendered size.
+        if let wanted = target.scale,
+           abs(wanted - chrome.scale) > 0.001,
+           wanted <= state.maxScale(for: id, on: target.scaleFrame) + 0.001 {
+            // Doesn't touch `placements`, so this can't fight step 4 below.
+            state.applyScaleWithoutRemembering(id, wanted)   // re-enters sync
+            return
+        }
+
+        // 3. Settle on a position: `maxScale` needs to know which display the
+        //    widget is on before it can decide what "too big" means.
+        size = WidgetShellMetrics.windowSize(for: state.renderedSize(for: id))
+        let topLeft = clamped(topLeft: target.topLeft, size: size, in: target.screenFrame)
         if chrome.originX != topLeft.x || chrome.originY != topLeft.y {
             // `recordOrigin` deliberately doesn't republish, so this can't loop.
             state.recordOrigin(id, topLeft: topLeft)
         }
+        if target.adopt {
+            // Nothing was remembered for this widget yet (a fresh install, or a
+            // document written before placements existed) — make wherever it is
+            // now its home, so the next display change has something to restore.
+            state.rememberPlacement(id, topLeft: topLeft)
+        }
 
-        // 2. A scale saved on a bigger display (or before a monitor was
-        //    unplugged) would hang off the screen — pull it back in.
+        // 4. A scale saved on a bigger display (or before a monitor was
+        //    unplugged) would hang off the screen — pull it back in. The
+        //    remembered placement keeps the user's chosen size for when that
+        //    display comes back.
         let limit = state.maxScale(for: id)
-        if chrome.scale > limit + 0.001 {
-            // Re-read rather than mutating the local copy: `recordOrigin` above
-            // may have just moved this instance, and `chrome` still holds the
-            // pre-move origin — writing it back would undo the placement.
-            var clamped = state.chrome(for: id)
-            clamped.scale = limit
-            state.updateChrome(id, clamped)   // re-enters sync with the new size
+        if state.chrome(for: id).scale > limit + 0.001 {
+            state.applyScaleWithoutRemembering(id, limit)   // re-enters sync
             return
         }
 
@@ -176,14 +240,106 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
 
     // MARK: Placement
 
-    /// Uses the stored top-left when it's still on a screen; otherwise picks a
-    /// sensible spot so a widget can never end up stranded off-screen.
-    private func resolvedTopLeft(chrome: WidgetChrome, size: CGSize, id: UUID) -> CGPoint {
+    /// Where a widget should sit right now, and on which display.
+    private struct ResolvedPlacement {
+        var topLeft: CGPoint
+        /// The display's full `frame`, for keeping the panel on that display.
+        var screenFrame: CGRect
+        /// The display's `visibleFrame` — what `AppState.screenFrame(for:)`
+        /// reports once the widget has moved there. The scale check below has to
+        /// use the same rect the clamp will, or a restore and a clamp could
+        /// undo each other forever.
+        var scaleFrame: CGRect
+        /// A remembered size to restore, when this came from a placement.
+        var scale: Double?
+        /// Record this spot as the widget's placement — only for a widget that
+        /// has none yet.
+        var adopt: Bool
+    }
+
+    /// Decides where a widget goes, in this order:
+    ///
+    /// 1. The most recent remembered placement whose display is attached. This is
+    ///    what restores a widget after a login, or after its monitor is unplugged
+    ///    and plugged back in.
+    /// 2. Its live position, if that's still on some attached display — the
+    ///    ordinary case where nothing about the displays changed.
+    /// 3. A cascaded default, so a widget can never end up stranded off-screen.
+    ///
+    /// Cases 2 and 3 leave `placements` alone (unless there are none to leave):
+    /// parking a widget on the built-in display because its own monitor is away
+    /// has to stay reversible, and overwriting what it remembers is exactly what
+    /// would make it permanent.
+    private func resolvedPlacement(chrome: WidgetChrome, size: CGSize, id: UUID) -> ResolvedPlacement {
+        if let (placement, screen) = bestRememberedPlacement(chrome: chrome) {
+            return ResolvedPlacement(
+                topLeft: placement.topLeft(on: screen.frame, size: size),
+                screenFrame: screen.frame,
+                scaleFrame: screen.visibleFrame,
+                scale: placement.scale,
+                adopt: false
+            )
+        }
+
+        let adopt = chrome.placements.isEmpty
         if let x = chrome.originX, let y = chrome.originY {
             let candidate = CGPoint(x: x, y: y)
-            if isOnAnyScreen(topLeft: candidate, size: size) { return candidate }
+            if isOnAnyScreen(topLeft: candidate, size: size) {
+                let screen = ScreenIdentity.screen(containing: candidate) ?? fallbackScreen
+                return ResolvedPlacement(
+                    topLeft: candidate,
+                    screenFrame: screen?.frame ?? fallbackFrame,
+                    scaleFrame: screen?.visibleFrame ?? fallbackFrame,
+                    scale: nil,
+                    adopt: adopt
+                )
+            }
         }
-        return defaultTopLeft(size: size, id: id)
+
+        let topLeft = defaultTopLeft(size: size, id: id)
+        let screen = ScreenIdentity.screen(containing: topLeft) ?? fallbackScreen
+        return ResolvedPlacement(
+            topLeft: topLeft,
+            screenFrame: screen?.frame ?? fallbackFrame,
+            scaleFrame: screen?.visibleFrame ?? fallbackFrame,
+            scale: nil,
+            adopt: adopt
+        )
+    }
+
+    /// The remembered placement to honour: the most recently used one among the
+    /// displays that are attached right now.
+    ///
+    /// Recency is what makes both directions work. Unplug the external monitor
+    /// and the widget falls back to whatever it remembers about the built-in
+    /// display; plug it back in and the external placement — still the newest —
+    /// wins again. Drag the widget somewhere on the built-in display in the
+    /// meantime and *that* becomes the newest, so it stays put: the last place
+    /// the user put it is always the place it goes.
+    private func bestRememberedPlacement(chrome: WidgetChrome) -> (WidgetPlacement, NSScreen)? {
+        chrome.placements
+            .compactMap { key, placement -> (WidgetPlacement, NSScreen)? in
+                guard let screen = ScreenIdentity.screen(for: key) else { return nil }
+                return (placement, screen)
+            }
+            .max { $0.0.updatedAt < $1.0.updatedAt }
+    }
+
+    private var fallbackScreen: NSScreen? {
+        NSScreen.main ?? NSScreen.screens.first
+    }
+
+    private var fallbackFrame: CGRect {
+        CGRect(x: 0, y: 0, width: 1440, height: 900)
+    }
+
+    /// Keeps the whole panel inside one display. Clamps against `frame` rather
+    /// than `visibleFrame` so a widget deliberately tucked up under the menu bar
+    /// isn't dragged down every time a display comes back.
+    private func clamped(topLeft: CGPoint, size: CGSize, in frame: CGRect) -> CGPoint {
+        let x = min(max(topLeft.x, frame.minX), max(frame.minX, frame.maxX - size.width))
+        let y = max(min(topLeft.y, frame.maxY), min(frame.maxY, frame.minY + size.height))
+        return CGPoint(x: x, y: y)
     }
 
     private func isOnAnyScreen(topLeft: CGPoint, size: CGSize) -> Bool {
@@ -213,6 +369,20 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
               let raw = panel.identifier?.rawValue,
               let id = UUID(uuidString: raw)
         else { return }
-        state.recordOrigin(id, topLeft: CGPoint(x: panel.frame.minX, y: panel.frame.maxY))
+        let topLeft = CGPoint(x: panel.frame.minX, y: panel.frame.maxY)
+
+        // A drag is the user saying "here", so it's remembered against the
+        // display it landed on. Anything else that moves the panel is not: when a
+        // monitor is unplugged, the window server itself shunts our windows onto
+        // a surviving display and posts this notification, and treating that as a
+        // deliberate placement would erase the very position we want to restore.
+        // The panel only moves under the mouse, so a held button is what tells
+        // the two apart.
+        let isUserDrag = NSEvent.pressedMouseButtons & 0x1 != 0
+        if isUserDrag {
+            state.rememberPlacement(id, topLeft: topLeft)
+        } else {
+            state.recordOrigin(id, topLeft: topLeft)
+        }
     }
 }

@@ -190,6 +190,89 @@ enum BorderTint: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+// MARK: - Remembered placement
+
+/// Where a widget sat on one particular display.
+///
+/// Positions are stored per display and relative to that display's top-left
+/// corner, not as the global Cocoa coordinates the window server hands us:
+/// unplugging a monitor (or plugging one in) renumbers and shifts every other
+/// display's global frame, so an absolute point is only meaningful while the
+/// exact same set of screens is attached.
+struct WidgetPlacement: Codable, Equatable, Sendable {
+    /// Top-left corner, measured right and *down* from the display's top-left.
+    var offsetX: Double = 0
+    var offsetY: Double = 0
+    /// The same corner as a fraction of the display's size, used when that
+    /// display's resolution changed while we weren't looking.
+    var fractionX: Double = 0
+    var fractionY: Double = 0
+    /// The size the widget had here. A display swap can force a widget to shrink
+    /// to fit; this is what it goes back to when the bigger screen returns.
+    var scale: Double = 1.0
+    /// When the user last put the widget here. Restoration picks the most recent
+    /// placement among the displays that are actually attached.
+    var updatedAt: Date = Date(timeIntervalSince1970: 0)
+
+    init(offsetX: Double, offsetY: Double, fractionX: Double, fractionY: Double, scale: Double, updatedAt: Date) {
+        self.offsetX = offsetX
+        self.offsetY = offsetY
+        self.fractionX = fractionX
+        self.fractionY = fractionY
+        self.scale = scale
+        self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = WidgetPlacement(offsetX: 0, offsetY: 0, fractionX: 0, fractionY: 0, scale: 1.0,
+                                updatedAt: Date(timeIntervalSince1970: 0))
+        offsetX = c.value(.offsetX, d.offsetX)
+        offsetY = c.value(.offsetY, d.offsetY)
+        fractionX = c.value(.fractionX, d.fractionX)
+        fractionY = c.value(.fractionY, d.fractionY)
+        scale = c.value(.scale, d.scale)
+        updatedAt = c.value(.updatedAt, d.updatedAt)
+    }
+}
+
+extension WidgetPlacement {
+
+    /// Captures a global top-left anchor as an offset within the display it sits
+    /// on. `frame` is that display's `NSScreen.frame`.
+    init(topLeft: CGPoint, on frame: CGRect, scale: Double) {
+        let dx = topLeft.x - frame.minX
+        // Cocoa's y grows upwards; measuring down from the top edge keeps a
+        // widget the same distance below the menu bar when a display's height
+        // changes, which is how people think about where they put it.
+        let dy = frame.maxY - topLeft.y
+        self.init(
+            offsetX: dx,
+            offsetY: dy,
+            fractionX: frame.width > 0 ? dx / frame.width : 0,
+            fractionY: frame.height > 0 ? dy / frame.height : 0,
+            scale: scale,
+            updatedAt: Date()
+        )
+    }
+
+    /// The global top-left anchor this placement means for a display that is
+    /// attached right now.
+    ///
+    /// Prefers the exact offsets — the same pixels the user dragged to — and only
+    /// falls back to the proportional ones when the display has since changed
+    /// resolution enough that a widget of `size` would no longer fit there.
+    func topLeft(on frame: CGRect, size: CGSize) -> CGPoint {
+        var dx = offsetX
+        var dy = offsetY
+        if dx + size.width > frame.width || dy + size.height > frame.height {
+            dx = fractionX * frame.width
+            dy = fractionY * frame.height
+        }
+        return CGPoint(x: frame.minX + dx, y: frame.maxY - dy)
+    }
+}
+
 // MARK: - Chrome (shared by every widget kind)
 
 /// Presentation state that every widget has, independent of its own config.
@@ -213,8 +296,14 @@ struct WidgetChrome: Codable, Equatable, Sendable {
     var showsShadow: Bool = false
     var showsBackground: Bool = true
     /// Top-left corner in Cocoa screen coordinates. `nil` means "place me".
+    ///
+    /// This is the widget's *live* position, rewritten whenever it has to be
+    /// nudged to stay on screen. `placements` is the durable record.
     var originX: Double? = nil
     var originY: Double? = nil
+    /// Remembered position per display, keyed by `ScreenIdentity`. Survives a
+    /// monitor being unplugged so the widget can go back when it returns.
+    var placements: [String: WidgetPlacement] = [:]
 
     init() {}
 
@@ -236,6 +325,7 @@ struct WidgetChrome: Codable, Equatable, Sendable {
         showsBackground = c.value(.showsBackground, d.showsBackground)
         originX = c.value(.originX, d.originX)
         originY = c.value(.originY, d.originY)
+        placements = c.value(.placements, d.placements)
     }
 }
 

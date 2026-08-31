@@ -171,8 +171,13 @@ final class AppState: ObservableObject {
     /// Largest scale at which the widget still fits its own screen, allowing for
     /// the transparent margin the shell adds.
     func maxScale(for id: UUID) -> Double {
+        maxScale(for: id, on: screenFrame(for: id))
+    }
+
+    /// As `maxScale(for:)`, but for a display the widget is about to move to —
+    /// its stored origin still points at the display it's leaving.
+    func maxScale(for id: UUID, on frame: CGRect) -> Double {
         let base = baseSize(for: id)
-        let frame = screenFrame(for: id)
         let byWidth = (frame.width - WidgetShellMetrics.insetSide * 2) / base.width
         let byHeight = (frame.height - WidgetShellMetrics.insetTop - WidgetShellMetrics.insetBottom) / base.height
         // Floor of 1.0 only guards against a degenerate slider range on a tiny
@@ -198,8 +203,28 @@ final class AppState: ObservableObject {
 
     func updateChrome(_ id: UUID, _ chrome: WidgetChrome) {
         guard let index = instances.firstIndex(where: { $0.id == id }) else { return }
-        guard instances[index].chrome != chrome else { return }
+        let previous = instances[index].chrome
+        guard previous != chrome else { return }
         instances[index].chrome = chrome
+        // A deliberate resize is part of "where I put this widget", so it belongs
+        // in the placement for the display it's on — but only if the widget is
+        // already homed there. Resizing a widget that is sitting on a stand-in
+        // display (because its own monitor is unplugged) must not claim that
+        // display, or it would never go home.
+        if previous.scale != chrome.scale { rememberScaleForCurrentScreen(id) }
+        instanceChanged.send(id)
+        save()
+    }
+
+    /// Applies a scale the app decided on rather than the user: fitting a widget
+    /// to a smaller display, or restoring the size it had on a display that just
+    /// came back. Deliberately leaves `placements` alone so the size the user
+    /// chose is still there when the bigger screen returns.
+    func applyScaleWithoutRemembering(_ id: UUID, _ scale: Double) {
+        guard let index = instances.firstIndex(where: { $0.id == id }),
+              instances[index].chrome.scale != scale
+        else { return }
+        instances[index].chrome.scale = scale
         instanceChanged.send(id)
         save()
     }
@@ -216,12 +241,51 @@ final class AppState: ObservableObject {
         save()
     }
 
-    /// Records a moved panel without triggering a geometry re-apply loop.
+    /// Records where a panel currently *is* without triggering a geometry
+    /// re-apply loop, and without claiming it as the widget's home.
+    ///
+    /// Used for positions the app chose — a widget parked on the built-in display
+    /// while its own monitor is away, say. The remembered placement is untouched,
+    /// which is what makes that relocation reversible.
     func recordOrigin(_ id: UUID, topLeft: CGPoint) {
         guard let index = instances.firstIndex(where: { $0.id == id }) else { return }
         instances[index].chrome.originX = topLeft.x
         instances[index].chrome.originY = topLeft.y
         save()
+    }
+
+    /// Records where the user *put* a panel: the live origin plus a durable,
+    /// display-relative placement that outlives the display being unplugged.
+    func rememberPlacement(_ id: UUID, topLeft: CGPoint) {
+        guard let index = instances.firstIndex(where: { $0.id == id }) else { return }
+        instances[index].chrome.originX = topLeft.x
+        instances[index].chrome.originY = topLeft.y
+        if let screen = ScreenIdentity.screen(containing: topLeft),
+           let key = ScreenIdentity.key(for: screen) {
+            instances[index].chrome.placements[key] = WidgetPlacement(
+                topLeft: topLeft,
+                on: screen.frame,
+                scale: instances[index].chrome.scale
+            )
+        }
+        save()
+    }
+
+    /// Keeps the current display's remembered scale in step with a user resize.
+    /// Only updates a placement that already exists — see `updateChrome`.
+    private func rememberScaleForCurrentScreen(_ id: UUID) {
+        guard let index = instances.firstIndex(where: { $0.id == id }) else { return }
+        let chrome = instances[index].chrome
+        guard let x = chrome.originX, let y = chrome.originY,
+              let screen = ScreenIdentity.screen(containing: CGPoint(x: x, y: y)),
+              let key = ScreenIdentity.key(for: screen),
+              chrome.placements[key] != nil
+        else { return }
+        // Scale only: `updatedAt` stays put deliberately. It ranks *placements*,
+        // and resizing a widget isn't a statement about which display it lives
+        // on — bumping it here would let a resize on a stand-in display outrank
+        // the monitor the widget actually belongs to.
+        instances[index].chrome.placements[key]?.scale = chrome.scale
     }
 
     // MARK: App settings
@@ -279,6 +343,9 @@ final class AppState: ObservableObject {
         copy.id = UUID()
         copy.chrome.originX = (source.chrome.originX ?? 80) + 32
         copy.chrome.originY = (source.chrome.originY ?? 80) - 32
+        // Not the original's remembered spot — the copy would restore straight
+        // back on top of it the next time a display changed.
+        copy.chrome.placements = [:]
         configs[copy.id] = cfg
         instances.append(copy)
         rosterChanged.send(())
@@ -303,6 +370,7 @@ final class AppState: ObservableObject {
         for index in instances.indices {
             instances[index].chrome.originX = nil
             instances[index].chrome.originY = nil
+            instances[index].chrome.placements = [:]
             instances[index].chrome.isLocked = false
         }
         for instance in instances { instanceChanged.send(instance.id) }
