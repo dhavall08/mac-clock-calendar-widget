@@ -48,7 +48,15 @@ enum PreviewRenderer {
         let clocks: [ClockVariant] = [
             ClockVariant(caption: "dark digital", accent: .mint),
             ClockVariant(caption: "light digital · solid", theme: .light, accent: .rose),
-            ClockVariant(caption: "CLASSIC dial · orange", theme: .light, accent: .orange, config: {
+            ClockVariant(caption: "CLASSIC dial · light · orange", theme: .light, accent: .orange, config: {
+                var c = ClockConfig.defaults
+                c.face = .analog
+                c.dialStyle = .classic
+                c.numerals = .all
+                c.showDate = false
+                return c
+            }()),
+            ClockVariant(caption: "CLASSIC dial · dark · orange", theme: .dark, accent: .orange, config: {
                 var c = ClockConfig.defaults
                 c.face = .analog
                 c.dialStyle = .classic

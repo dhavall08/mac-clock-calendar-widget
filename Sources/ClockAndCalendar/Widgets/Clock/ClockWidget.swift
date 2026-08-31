@@ -18,8 +18,9 @@ enum ClockFace: String, Codable, CaseIterable, Identifiable, Sendable {
 enum DialStyle: String, Codable, CaseIterable, Identifiable, Sendable {
     /// Follows the widget theme: dark dial, accent-tinted ticks, neon glow.
     case modern
-    /// The stock macOS clock: white face, black tapered hands, coloured second
-    /// hand, black 5-minute ticks with fine grey minute ticks between them.
+    /// The stock macOS clock: plain face, contrasting tapered hands, coloured
+    /// second hand, heavy 5-minute ticks with fine minute ticks between them.
+    /// The face flips with the widget theme — white in light, near-black in dark.
     case classic
 
     var id: String { rawValue }
@@ -192,11 +193,30 @@ struct ClockWidgetView: View {
 
     /// Second hand and hub colour on the dial.
     ///
-    /// The classic face is white whatever the widget theme is, so it takes the
-    /// undimmed accent — the light theme's darkened variant exists for accents
-    /// sitting on a light *panel*, and applying it here turned the stock clock's
-    /// vivid orange into brown.
+    /// The classic dial always takes the undimmed accent — the light theme's
+    /// darkened variant exists for accents sitting on a light *panel*, and
+    /// applying it here turned the stock clock's vivid orange into brown. It
+    /// reads well on both classic faces, which are near-white or near-black.
     private var dialAccent: Color { isClassic ? accent.color(.dark) : accent.color(theme) }
+
+    /// Face colour of the classic dial.
+    ///
+    /// This follows the widget theme the way the stock macOS clock does: a white
+    /// face in light, a near-black one in dark. It used to be white in both, and
+    /// since the dial also hardcoded its ink, a classic clock with the glass
+    /// panel switched off and the date line hidden had no theme-dependent pixels
+    /// left at all — picking "Dark" appeared to do nothing.
+    private var classicFace: Color {
+        theme == .light ? Color.white : Color(red: 0.08, green: 0.09, blue: 0.11)
+    }
+
+    /// Ink on the classic dial — rim, ticks, numerals, hands.
+    ///
+    /// Always the inverse of `classicFace`, so one set of opacities gives the
+    /// same contrast in both themes.
+    private func classicInk(_ opacity: Double) -> Color {
+        (theme == .light ? Color.black : Color.white).opacity(opacity)
+    }
 
     private var radius: CGFloat { config.dialDiameter / 2 }
 
@@ -307,8 +327,8 @@ struct ClockWidgetView: View {
     @ViewBuilder
     private var dialBackground: some View {
         if isClassic {
-            Circle().fill(Color.white)
-            Circle().stroke(Color.black.opacity(0.10), lineWidth: max(1, radius * 0.012))
+            Circle().fill(classicFace)
+            Circle().stroke(classicInk(0.10), lineWidth: max(1, radius * 0.012))
         } else {
             Circle().stroke(palette.hairline, lineWidth: 1)
             Circle().fill(
@@ -337,7 +357,7 @@ struct ClockWidgetView: View {
 
     private func tickColor(isMajor: Bool) -> Color {
         if isClassic {
-            return isMajor ? Color.black.opacity(0.88) : Color.black.opacity(0.26)
+            return isMajor ? classicInk(0.88) : classicInk(0.26)
         }
         return isMajor ? accentColor.opacity(0.7) : palette.textTertiary.opacity(0.5)
     }
@@ -353,14 +373,14 @@ struct ClockWidgetView: View {
                               weight: isClassic ? .semibold : .semibold,
                               design: isClassic ? .default : design))
                 .monospacedDigit()
-                .foregroundStyle(isClassic ? Color.black.opacity(0.90) : palette.textPrimary.opacity(0.82))
+                .foregroundStyle(isClassic ? classicInk(0.90) : palette.textPrimary.opacity(0.82))
                 .offset(x: labelRadius * cos(angle.radians), y: labelRadius * sin(angle.radians))
         }
     }
 
     @ViewBuilder
     private func hands(hour: Double, minute: Double, second: Double) -> some View {
-        let handColor = isClassic ? Color.black.opacity(0.92) : palette.textPrimary
+        let handColor = isClassic ? classicInk(0.92) : palette.textPrimary
         let secondColor = dialAccent
 
         hand(length: radius * 0.50, width: radius * 0.090, angle: hour * 30, color: handColor)
@@ -488,7 +508,7 @@ private struct ClockSettingsView: View {
                 Divider().overlay(Theme.hairline)
                 SettingRow(label: "Dial style",
                            detail: ctx.config.dialStyle == .classic
-                               ? "White face, black hands, coloured second hand"
+                               ? "Plain face that follows the theme, coloured second hand"
                                : "Follows the widget theme and accent") {
                     NeoSegmented(selection: ctx.bind(\.dialStyle),
                                  options: DialStyle.allCases,
