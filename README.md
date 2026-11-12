@@ -1,9 +1,18 @@
 # Clock and Calendar by Dhaval
 
-Resizable desktop widgets for macOS. Calendar first, clock included, built to have
-more widgets added later.
+Resizable desktop widgets for macOS. Calendar first, clock included, built to have more widgets added later.
+
+**[Download the latest release](https://github.com/dhavall08/mac-clock-calendar-widget/releases/latest)**
+· macOS 14 or later · Apple silicon and Intel · free and open source
 
 ![Calendar and clock widgets on the desktop](docs/screenshot.png)
+
+## Why I built it
+
+I work across several screens and wanted a large clock and calendar always
+visible on the desktop of one of them, without opening an app or clicking the
+menu bar. If you have a spare monitor, or a corner of one, this may be useful to
+you too.
 
 ## Features
 
@@ -24,23 +33,37 @@ more widgets added later.
 
 ## Install
 
-**Download.** Get the zip from the
+### Download
+
+1. Open the [latest release](https://github.com/dhavall08/mac-clock-calendar-widget/releases/latest)
+   and download `ClockAndCalendar-<version>.zip` under **Assets**. It is a
+   universal build (Apple silicon and Intel) for macOS 14 or later.
+2. Double-click the zip to unzip it.
+3. Drag **Clock and Calendar by Dhaval** into your `/Applications` folder.
+4. Allow it to open. The app is ad-hoc signed and not notarised, because
+   notarisation needs a paid Apple Developer account, so macOS blocks it the
+   first time. Open Terminal and run this once:
+
+   ```bash
+   xattr -dr com.apple.quarantine "/Applications/Clock and Calendar by Dhaval.app"
+   ```
+
+   No Terminal? Double-click the app, dismiss the warning, then go to
+   System Settings → Privacy & Security, scroll down and click **Open Anyway**.
+5. Open the app from `/Applications` or Spotlight.
+
+To start it at every login, open Settings → Preferences and turn on
+**Start at login**.
+
+To update, quit the app from its menu bar icon, download the new zip and
+replace the copy in `/Applications`. Your settings are kept.
+
+Older versions are on the
 [Releases](https://github.com/dhavall08/mac-clock-calendar-widget/releases) page.
-It is a universal build (Apple silicon and Intel) for macOS 14 or later. Unzip
-it and move the app to `/Applications`.
 
-The zip is ad-hoc signed and not notarised, because notarisation needs a paid
-Apple Developer account. macOS will refuse to open it the first time. Clear the
-quarantine flag once:
+### Build from source
 
-```bash
-xattr -dr com.apple.quarantine "/Applications/Clock and Calendar by Dhaval.app"
-```
-
-Or try to open it, then go to System Settings → Privacy & Security and click
-**Open Anyway**.
-
-**Or build it yourself.** This needs only the Command Line Tools
+This needs only the Command Line Tools
 (`xcode-select --install`). No Xcode, no Apple Developer account, no payment.
 It takes under a minute.
 
@@ -112,7 +135,7 @@ doesn't take focus when you click it.
 ad-hoc signature (`codesign --sign -`) is all macOS asks for. No certificate,
 no notarisation, no 7-day expiry.
 
-A downloaded release does get the flag. See [Install](#install).
+A downloaded release does get the flag. See [Download](#download).
 
 If you ever do want a Notification Center widget as well, `CalendarMath` and
 `CalendarWidgetView` are free of AppKit and app state — they can be dropped
