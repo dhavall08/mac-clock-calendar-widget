@@ -63,10 +63,10 @@ enum DialNumerals: String, Codable, CaseIterable, Identifiable, Sendable {
 }
 
 struct ClockConfig: WidgetConfig {
-    var face: ClockFace = .digital
+    var face: ClockFace = .analog
     var use24Hour: Bool = false
     var showSeconds: Bool = true
-    var showDate: Bool = true
+    var showDate: Bool = false
 
     // Digital
     /// Point size of the time itself, at scale 1.0.
@@ -75,14 +75,14 @@ struct ClockConfig: WidgetConfig {
     // Analog
     var dialStyle: DialStyle = .classic
     /// Diameter of the dial, at scale 1.0.
-    var dialDiameter: Double = 176
+    var dialDiameter: Double = 236
     var showTicks: Bool = true
     var numerals: DialNumerals = .all
     /// Point size of the hour numbers, at scale 1.0.
-    var numeralSize: Double = 17
-    var sweepSecondHand: Bool = true
+    var numeralSize: Double = 18.8
+    var sweepSecondHand: Bool = false
 
-    var typeStyle: TypeStyle = .rounded
+    var typeStyle: TypeStyle = .system
 
     // World clock
     /// IANA identifier, or nil for this Mac's zone. DST is handled by the

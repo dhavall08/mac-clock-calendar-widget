@@ -350,8 +350,8 @@ struct AppSettings: Codable, Equatable, Sendable {
     var launchAtLogin: Bool = false
 
     /// Remembered Settings window size, so a wider layout survives a relaunch.
-    var settingsWidth: Double = 840
-    var settingsHeight: Double = 720
+    var settingsWidth: Double = 1116
+    var settingsHeight: Double = 857
 
     static let minimumSettingsSize = CGSize(width: 700, height: 480)
 

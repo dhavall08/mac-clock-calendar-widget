@@ -81,14 +81,14 @@ struct CalendarConfig: WidgetConfig {
 
     var showHeader: Bool = true
     var showMonthNavigation: Bool = true
-    var showYear: Bool = true
+    var showYear: Bool = false
     var showWeekNumbers: Bool = false
-    var showAdjacentMonths: Bool = true
-    var showTodayLine: Bool = true
-    var showGridLines: Bool = false
+    var showAdjacentMonths: Bool = false
+    var showTodayLine: Bool = false
+    var showGridLines: Bool = true
     /// Vertical rules on the boundary between weekend and weekday columns — with
     /// a Sunday start, one after Sun and one before Sat.
-    var showWeekendSeparators: Bool = false
+    var showWeekendSeparators: Bool = true
     var highlightWeekends: Bool = true
     /// Marks today's column in the weekday header, so the current day of the
     /// week is readable straight from the heading.
@@ -96,7 +96,7 @@ struct CalendarConfig: WidgetConfig {
     /// Always draw six week rows so the widget never changes size month to month.
     var fixedSixWeeks: Bool = true
 
-    var typeStyle: TypeStyle = .rounded
+    var typeStyle: TypeStyle = .system
     /// Months away from the current month. Persisted so the widget stays where
     /// you left it after a relaunch.
     var monthOffset: Int = 0
@@ -108,13 +108,13 @@ struct CalendarConfig: WidgetConfig {
     // can't collide with the row below.
 
     /// The Gregorian day number — 1, 2, 3…
-    var dayNumberSize: Double = 14.5
+    var dayNumberSize: Double = 22.4
     /// The tithi / moon / holiday strip under each day.
-    var secondaryTextSize: Double = 8
+    var secondaryTextSize: Double = 10.4
     /// The full-date line along the bottom.
     var footerTextSize: Double = 10.5
     /// Multiplier for the hover tooltip.
-    var tooltipScale: Double = 1.0
+    var tooltipScale: Double = 1.26
 
     // MARK: Holidays
 

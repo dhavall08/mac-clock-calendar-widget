@@ -90,20 +90,43 @@ final class AppState: ObservableObject {
     }
 
     private func seedDefaults() {
-        // A calendar, visible; a clock, ready but off, to show the gallery works.
+        // A calendar and an analog clock, both visible.
         var calendar = WidgetInstance(kind: CalendarWidget.kind)
-        calendar.chrome.scale = 1.4
-        calendar.chrome.accent = .cyan
+        calendar.chrome = Self.defaultChrome(for: CalendarWidget.kind)
         configs[calendar.id] = CalendarConfig.defaults
 
         var clock = WidgetInstance(kind: ClockWidget.kind)
-        clock.chrome.isVisible = false
-        clock.chrome.scale = 1.2
-        clock.chrome.accent = .violet
+        clock.chrome = Self.defaultChrome(for: ClockWidget.kind)
         configs[clock.id] = ClockConfig.defaults
 
         instances = [calendar, clock]
         save(immediately: true)
+    }
+
+    /// Starting look for a new widget of `kind`. Position is left nil so the
+    /// window controller places it on whatever display is attached.
+    static func defaultChrome(for kind: String) -> WidgetChrome {
+        var chrome = WidgetChrome()
+        switch kind {
+        case CalendarWidget.kind:
+            chrome.scale = 1.41
+            chrome.accent = .blue
+            chrome.cornerRadius = 32
+            chrome.borderWidth = 0.9
+            chrome.showsShadow = true
+        case ClockWidget.kind:
+            chrome.scale = 1.87
+            chrome.theme = .light
+            chrome.accent = .crimson
+            chrome.cornerRadius = 24.6
+            chrome.borderWidth = 0.46
+            chrome.showsBackground = false
+            chrome.showsGlow = true
+            chrome.showsShadow = true
+        default:
+            chrome.scale = 1.3
+        }
+        return chrome
     }
 
     // MARK: Reads
@@ -321,8 +344,7 @@ final class AppState: ObservableObject {
     func addWidget(kind: String) -> UUID? {
         guard let type = WidgetRegistry.type(for: kind) else { return nil }
         var instance = WidgetInstance(kind: kind)
-        instance.chrome.scale = 1.3
-        instance.chrome.accent = Accent.allCases.randomElement() ?? .cyan
+        instance.chrome = Self.defaultChrome(for: kind)
         configs[instance.id] = type.decodeConfig(type.defaultConfigData())
         instances.append(instance)
         rosterChanged.send(())
@@ -357,9 +379,8 @@ final class AppState: ObservableObject {
         configs[id] = type.decodeConfig(type.defaultConfigData())
         if let index = instances.firstIndex(where: { $0.id == id }) {
             let wasVisible = instances[index].chrome.isVisible
-            instances[index].chrome = WidgetChrome()
+            instances[index].chrome = Self.defaultChrome(for: instances[index].kind)
             instances[index].chrome.isVisible = wasVisible
-            instances[index].chrome.scale = 1.3
         }
         instanceChanged.send(id)
         save()
