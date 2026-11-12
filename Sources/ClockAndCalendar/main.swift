@@ -11,6 +11,12 @@ if let flagIndex = CommandLine.arguments.firstIndex(of: "--render-preview") {
     exit(ok ? 0 : 1)
 }
 
+// The login item can start the executable while the app is already open.
+guard MainActor.assumeIsolated({ SingleInstance.acquire() }) else {
+    NSLog("ClockAndCalendar: already running, exiting this copy")
+    exit(0)
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

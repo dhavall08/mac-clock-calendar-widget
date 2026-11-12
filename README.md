@@ -72,7 +72,7 @@ Quit the app from its menu bar icon first.
 | | Path |
 | --- | --- |
 | Settings file | `~/Library/Application Support/ClockAndCalendar/state.json` |
-| App bundle | `/Applications/Clock and Calendar by Dhaval.app` (or `./dist/`) |
+| App bundle | `/Applications/Clock and Calendar by Dhaval.app` (`./dist/` for a build without `--install`) |
 | Login item | `~/Library/LaunchAgents/com.dhaval.clockandcalendar.plist` |
 
 The settings file is pretty-printed JSON and safe to delete to start over.
@@ -429,6 +429,7 @@ Sources/ClockAndCalendar/
     AppState.swift                single source of truth, persistence, migration
     LenientDecoding.swift         missing keys fall back to defaults
     LoginItemManager.swift        LaunchAgent, no entitlements needed
+    SingleInstance.swift          file lock so only one copy runs
     Astronomy.swift               sun/moon longitude, phases (Meeus)
     TimeKeeper.swift              one shared timer for the whole app
   UI/

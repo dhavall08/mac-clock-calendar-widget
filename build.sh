@@ -108,6 +108,9 @@ if [[ $INSTALL -eq 1 ]]; then
   cp -R "$APP" "/Applications/$APP_NAME.app"
   # Locally built apps are never quarantined, but clear it defensively.
   xattr -dr com.apple.quarantine "/Applications/$APP_NAME.app" 2>/dev/null || true
+  # Leaving a second bundle in dist makes the app show up twice in Spotlight
+  # and Launchpad.
+  rm -rf "$APP"
   open "/Applications/$APP_NAME.app"
   echo "==> Running from /Applications — look for the calendar-clock icon in your menu bar"
 elif [[ $RUN -eq 1 ]]; then
