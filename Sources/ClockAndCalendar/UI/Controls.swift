@@ -275,7 +275,7 @@ struct IconButton: View {
     var isProminent: Bool = false
     let action: () -> Void
 
-    @State private var hovering = false
+    @ViewState private var hovering = false
 
     var body: some View {
         Button(action: action) {

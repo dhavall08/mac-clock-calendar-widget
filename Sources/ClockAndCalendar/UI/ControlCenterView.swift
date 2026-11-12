@@ -495,7 +495,7 @@ struct ControlCenterView: View {
 // MARK: - Hover row
 
 struct HoverRowStyle: ButtonStyle {
-    @State private var hovering = false
+    @ViewState private var hovering = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label

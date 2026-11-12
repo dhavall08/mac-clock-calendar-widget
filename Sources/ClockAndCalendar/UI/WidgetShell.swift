@@ -28,8 +28,8 @@ struct WidgetShell: View {
     let id: UUID
     let onOpenSettings: () -> Void
 
-    @State private var isHovering = false
-    @State private var dragStartScale: Double?
+    @ViewState private var isHovering = false
+    @ViewState private var dragStartScale: Double?
 
     private var chrome: WidgetChrome { state.chrome(for: id) }
     private var base: CGSize { state.baseSize(for: id) }

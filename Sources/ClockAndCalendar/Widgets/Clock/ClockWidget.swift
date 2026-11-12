@@ -448,7 +448,7 @@ private struct ClockSettingsView: View {
     /// Settings controls use the fixed blue, not the widget accent.
     private var accent: Accent { Theme.control }
 
-    @State private var zoneQuery = ""
+    @ViewState private var zoneQuery = ""
 
     var body: some View {
         VStack(spacing: 12) {

@@ -40,7 +40,7 @@ private struct CalendarSettingsView: View {
     @ObservedObject var state: AppState
     let id: UUID
 
-    @State private var showingHolidayManager = false
+    @ViewState private var showingHolidayManager = false
 
     private var ctx: WidgetContext<CalendarConfig> { WidgetContext(id: id, state: state) }
     /// Settings controls use the fixed blue, not the widget accent.

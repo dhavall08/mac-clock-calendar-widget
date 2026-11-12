@@ -10,6 +10,12 @@ notarisation, no payment.
 ./build.sh --install     # build, install to /Applications, launch
 ```
 
+Or download the prebuilt app from the
+[Releases](https://github.com/dhavall08/mac-clock-calendar-widget/releases) page.
+It is a universal build (Apple silicon and Intel) for macOS 14 or later. See
+[Installing a downloaded build](#installing-a-downloaded-build) for the one
+extra step macOS asks for.
+
 Look for the calendar-clock icon in your menu bar. Everything is configured from
 **Settings** (menu bar → Settings…, or ⌘, when the window is focused).
 
@@ -55,10 +61,24 @@ So this is a standalone app that behaves like a widget: a borderless glass
 panel pinned to the desktop layer, on all Spaces, with no Dock icon, that
 doesn't take focus when you click it.
 
-**Gatekeeper is a non-issue.** Quarantine is applied to *downloaded* apps. An
-app you compile yourself never gets the flag, so the ad-hoc signature
-(`codesign --sign -`) is all macOS asks for. No certificate, no notarisation,
-no 7-day expiry.
+**Gatekeeper is a non-issue for local builds.** Quarantine is applied to
+*downloaded* apps. An app you compile yourself never gets the flag, so the
+ad-hoc signature (`codesign --sign -`) is all macOS asks for. No certificate,
+no notarisation, no 7-day expiry.
+
+### Installing a downloaded build
+
+The release zip is ad-hoc signed and not notarised, because notarisation needs
+a paid Apple Developer account. macOS will refuse to open it on first launch.
+Unzip it, move the app to `/Applications`, then clear the quarantine flag once:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Clock and Calendar by Dhaval.app"
+```
+
+Or try to open it, then go to System Settings → Privacy & Security and click
+**Open Anyway**. If you would rather not trust a downloaded binary, build it
+yourself with `./build.sh --install`. It takes under a minute.
 
 If you ever do want a Notification Center widget as well, `CalendarMath` and
 `CalendarWidgetView` are free of AppKit and app state — they can be dropped
@@ -385,13 +405,38 @@ swift build -c release
 ./build.sh --run                                       # run from ./dist
 .build/release/ClockAndCalendar --render-preview p.png  # offscreen preview, no windows
 ./build.sh --unlogin                                   # remove the login item
+./build.sh --zip                                       # zip for a GitHub release
 
 # Is the status item currently installed? (useful once it's hidden)
 defaults read com.dhaval.clockandcalendar statusItemInstalled
 ```
 
 Requirements: macOS 14+ to run (Liquid Glass on 26+, material fallback below),
-Command Line Tools with Swift 6. Built and verified on macOS 26.5.
+Command Line Tools with Swift 6. Built and verified on macOS 26.5 and 27.2.
+
+`build.sh` makes a universal binary (arm64 + x86_64) and falls back to this
+Mac's architecture if the toolchain can't.
+
+Use `@ViewState` instead of `@State` in views. With the macOS 27 SDK a bare
+`@State` is a macro whose plugin ships only with Xcode, so it fails to compile
+on Command Line Tools alone. `ViewState` (`UI/ViewState.swift`) is a typealias
+to the same property wrapper.
 
 Concurrency: the app is `@MainActor` throughout and builds in Swift 5 language
 mode (`Package.swift`) so AppKit callbacks stay ergonomic.
+
+### Releasing
+
+Bump `CFBundleShortVersionString` and `CFBundleVersion` in
+`Resources/Info.plist`, then:
+
+```bash
+./build.sh --zip
+gh release create v1.1.0 dist/ClockAndCalendar-1.1.0.zip --title "v1.1.0" --generate-notes
+```
+
+---
+
+## License
+
+MIT. See [LICENSE](LICENSE).

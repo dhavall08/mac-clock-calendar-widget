@@ -10,8 +10,8 @@ struct HolidayManagerView: View {
     let id: UUID
     let onClose: () -> Void
 
-    @State private var draft = CustomHoliday()
-    @State private var year: Int = Calendar(identifier: .gregorian).component(.year, from: Date())
+    @ViewState private var draft = CustomHoliday()
+    @ViewState private var year: Int = Calendar(identifier: .gregorian).component(.year, from: Date())
 
     private var ctx: WidgetContext<CalendarConfig> { WidgetContext(id: id, state: state) }
     private var config: CalendarConfig { ctx.config }

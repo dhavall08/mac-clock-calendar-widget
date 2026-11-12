@@ -15,7 +15,7 @@ struct CalendarWidgetView: View {
     @ObservedObject private var time = TimeKeeper.shared
     /// Grid position of the cell under the pointer, for the hover highlight and
     /// the tooltip anchor.
-    @State private var hover: HoverTarget?
+    @ViewState private var hover: HoverTarget?
 
     private struct HoverTarget: Equatable {
         let row: Int

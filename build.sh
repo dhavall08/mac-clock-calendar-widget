@@ -7,6 +7,7 @@
 #   ./build.sh --run        build + run from dist
 #   ./build.sh --install --login   also start it at every login
 #   ./build.sh --unlogin    remove the login item
+#   ./build.sh --zip        build + zip for a GitHub release -> dist/ClockAndCalendar-<version>.zip
 #
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -22,11 +23,13 @@ AGENT="$HOME/Library/LaunchAgents/$BUNDLE_ID.plist"
 INSTALL=0
 RUN=0
 LOGIN=0
+ZIP=0
 for arg in "$@"; do
   case "$arg" in
     --install) INSTALL=1 ;;
     --run) RUN=1 ;;
     --login) LOGIN=1 ;;
+    --zip) ZIP=1 ;;
     --unlogin)
       launchctl bootout "gui/$UID/$BUNDLE_ID" 2>/dev/null || true
       rm -f "$AGENT"
@@ -37,13 +40,22 @@ for arg in "$@"; do
   esac
 done
 
-echo "==> Compiling (release)"
-swift build -c release
+# Universal (Apple silicon + Intel) when the toolchain can do it in one step,
+# otherwise just this Mac's architecture.
+echo "==> Compiling (release, universal)"
+ARCH_FLAGS=(--arch arm64 --arch x86_64)
+if ! swift build -c release "${ARCH_FLAGS[@]}"; then
+  echo "    universal build failed, building for this Mac only"
+  ARCH_FLAGS=()
+  swift build -c release
+fi
+BIN_DIR="$(swift build -c release ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} --show-bin-path)"
+echo "    architectures: $(lipo -archs "$BIN_DIR/$BINARY")"
 
 echo "==> Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
-cp ".build/release/$BINARY" "$CONTENTS/MacOS/$BINARY"
+cp "$BIN_DIR/$BINARY" "$CONTENTS/MacOS/$BINARY"
 cp "Resources/Info.plist" "$CONTENTS/Info.plist"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 
@@ -78,6 +90,15 @@ codesign --force --deep --sign - "$APP"
 codesign --verify --verbose=1 "$APP" 2>&1 | sed 's/^/    /'
 
 echo "==> Built $APP"
+
+if [[ $ZIP -eq 1 ]]; then
+  VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
+  ZIP_PATH="$DIST/$BINARY-$VERSION.zip"
+  rm -f "$ZIP_PATH"
+  # ditto, not zip: it keeps the code signature intact.
+  ditto -c -k --keepParent "$APP" "$ZIP_PATH"
+  echo "==> Zipped $ZIP_PATH"
+fi
 
 if [[ $INSTALL -eq 1 ]]; then
   echo "==> Installing to /Applications"
