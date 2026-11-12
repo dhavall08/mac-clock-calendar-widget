@@ -3,21 +3,67 @@
 Resizable desktop widgets for macOS. Calendar first, clock included, built to have
 more widgets added later.
 
-Runs entirely from a local build: no Xcode, no Apple Developer account, no
-notarisation, no payment.
+![Calendar and clock widgets on the desktop](docs/screenshot.png)
+
+## Features
+
+- **Calendar** that resizes continuously, from compact up to the full screen.
+- **Clock**, digital or analog, with world clocks for 50 cities.
+- **Hindu calendar (panchang)**: the tithi under every date and the Hindu month
+  in the header, in **Gujarati (ગુજરાતી)**, **Hindi / Devanagari (देवनागरी)** or
+  **English**.
+- **Only want the English date?** Turn off **Hindu calendar** in Settings and
+  you get a plain Gregorian calendar. See [English only](#english-only).
+- **Holidays** for India, USA and UK, plus your own dates. All computed, so any
+  year works.
+- **Moon phases**, dark and light themes, 20 accent colours, glass background.
+- Sits on the desktop behind your windows, on every Space, with no Dock icon.
+- No network access, no account, no tracking. Settings stay in one local file.
+
+![Every widget face: dark and light calendars, analog and digital clocks](docs/gallery.png)
+
+## Install
+
+**Download.** Get the zip from the
+[Releases](https://github.com/dhavall08/mac-clock-calendar-widget/releases) page.
+It is a universal build (Apple silicon and Intel) for macOS 14 or later. Unzip
+it and move the app to `/Applications`.
+
+The zip is ad-hoc signed and not notarised, because notarisation needs a paid
+Apple Developer account. macOS will refuse to open it the first time. Clear the
+quarantine flag once:
 
 ```bash
-./build.sh --install     # build, install to /Applications, launch
+xattr -dr com.apple.quarantine "/Applications/Clock and Calendar by Dhaval.app"
 ```
 
-Or download the prebuilt app from the
-[Releases](https://github.com/dhavall08/mac-clock-calendar-widget/releases) page.
-It is a universal build (Apple silicon and Intel) for macOS 14 or later. See
-[Installing a downloaded build](#installing-a-downloaded-build) for the one
-extra step macOS asks for.
+Or try to open it, then go to System Settings → Privacy & Security and click
+**Open Anyway**.
+
+**Or build it yourself.** This needs only the Command Line Tools
+(`xcode-select --install`). No Xcode, no Apple Developer account, no payment.
+It takes under a minute.
+
+```bash
+git clone https://github.com/dhavall08/mac-clock-calendar-widget.git
+cd mac-clock-calendar-widget
+./build.sh --install           # build, install to /Applications, launch
+./build.sh --install --login   # same, and start at every login
+```
 
 Look for the calendar-clock icon in your menu bar. Everything is configured from
 **Settings** (menu bar → Settings…, or ⌘, when the window is focused).
+
+### Uninstall
+
+```bash
+./build.sh --unlogin                                         # remove the login item
+rm -rf "/Applications/Clock and Calendar by Dhaval.app"
+rm -rf ~/Library/Application\ Support/ClockAndCalendar       # settings
+defaults delete com.dhaval.clockandcalendar
+```
+
+Quit the app from its menu bar icon first.
 
 ---
 
@@ -66,19 +112,7 @@ doesn't take focus when you click it.
 ad-hoc signature (`codesign --sign -`) is all macOS asks for. No certificate,
 no notarisation, no 7-day expiry.
 
-### Installing a downloaded build
-
-The release zip is ad-hoc signed and not notarised, because notarisation needs
-a paid Apple Developer account. macOS will refuse to open it on first launch.
-Unzip it, move the app to `/Applications`, then clear the quarantine flag once:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/Clock and Calendar by Dhaval.app"
-```
-
-Or try to open it, then go to System Settings → Privacy & Security and click
-**Open Anyway**. If you would rather not trust a downloaded binary, build it
-yourself with `./build.sh --install`. It takes under a minute.
+A downloaded release does get the flag. See [Install](#install).
 
 If you ever do want a Notification Center widget as well, `CalendarMath` and
 `CalendarWidgetView` are free of AppKit and app state — they can be dropped
@@ -132,13 +166,13 @@ menu bar to jump straight to a widget's settings.
   the app, widgets or Settings.
 - **Opacity**, **corner radius**, **glass background**.
 - **Border width** (0 hides it) and **border colour** — Subtle / Accent / Neutral.
+- **Neon glow** and **drop shadow**, both off by default. The shadow has to be
+  clipped by the panel bounds, and the clipped edge is what reads as a faint grey
+  box around the widget — leave it off unless you want it.
 
 The Settings window itself is always dark with a **fixed blue** accent. It
 deliberately does not follow the selected widget's colour — having the whole UI
 change hue as you clicked between widgets read as a bug.
-- **Neon glow** and **drop shadow**, both off by default. The shadow has to be
-  clipped by the panel bounds, and the clipped edge is what reads as a faint grey
-  box around the widget — leave it off unless you want it.
 
 ### Calendar options
 
@@ -148,7 +182,9 @@ rounded square** · today's weekday **marked in the heading** · ISO week-number
 column · greyed days from adjacent months · month navigation arrows with a
 *Today* reset · row separators · **weekend separators** · **Saturday and Sunday
 tinted alike** · always-six-rows (so the widget never changes size month to
-month) · Rounded / System / Mono / Serif typeface.
+month) · month header on or off · **show year** · **full date footer**
+("Friday, 14 August 2026" under the grid) · Rounded / System / Mono / Serif
+typeface.
 
 **Weekend separators** draw a vertical rule wherever a weekend column meets a
 weekday one — with a Sunday start that's after Sun and before Sat. The positions
@@ -213,9 +249,15 @@ for new — with quarters as an extra toggle.
 Gregorian day stays dominant. **Gujarati** is the default and is not a
 transliteration: it uses the words a Gujarati panchang actually prints — સુદ / વદ
 for the paksha, એકમ · બીજ · ત્રીજ for the tithis, પૂનમ / અમાસ for full and new
-moon, and Gujarati numerals. Cells read `સુદ ૧૨`, `વદ ૪`, `પૂનમ`, `અમાસ`. English
-and Devanagari are also available. Turn the whole thing off and the row
-disappears and the cells shrink.
+moon, and Gujarati numerals. Cells read `સુદ ૧૨`, `વદ ૪`, `પૂનમ`, `અમાસ`.
+
+Pick the script under **Moon & panchang → Language**:
+
+| Option in Settings | What it is |
+| --- | --- |
+| **ગુજરાતી** | Gujarati. The default. |
+| **देवनागरी** | Devanagari, the script Hindi is written in. Choose this one if you read Hindi. |
+| **English** | The same tithi names in Latin letters. |
 
 With it on, the header also shows the Hindu month in brackets next to the
 Gregorian one — `August (અષાઢ–શ્રાવણ)`. A Gregorian month almost always straddles
@@ -224,6 +266,19 @@ two lunar months, so both are named.
 A repeated tithi on two consecutive days (*adhika tithi*) or a skipped one
 (*kshaya tithi*) is correct, not a bug — a tithi is 1/30th of the Moon's
 elongation from the Sun and doesn't line up with a 24-hour day.
+
+#### English only
+
+If you don't use the Hindu calendar, switch it off: Settings → select the
+calendar → **Moon & panchang** → turn off **Hindu calendar**. The tithi row
+under each date disappears, the Hindu month leaves the header, and the cells
+shrink. What is left is a plain calendar with English (Gregorian) dates only.
+
+Two more switches finish the job if you want them:
+
+- **Holidays → Regions.** India is on by default. Pick USA or UK instead, or
+  turn all of them off.
+- **Moon phases.** Turn off to remove the new and full moon marks.
 
 ### Clock options
 
@@ -356,6 +411,7 @@ Package.swift                     SPM executable, no Xcode project
 build.sh                          build → .app → ad-hoc sign → install → login item
 Resources/Info.plist              LSUIElement (menu-bar only), bundle id, icon
 tools/make-icon.swift             draws the app icon at build time
+docs/                             README screenshots
 
 Sources/ClockAndCalendar/
   main.swift                      entry point + --render-preview
@@ -379,6 +435,7 @@ Sources/ClockAndCalendar/
     Theme.swift                   Palette (per-widget) + Theme (Settings window)
     GlassBackground.swift         Liquid Glass on macOS 26, material fallback
     Controls.swift                slider, segmented, toggle, chips, accents
+    ViewState.swift               @State without the Xcode-only macro
     WidgetShell.swift             glass + hover toolbar + resize grip + scaling
     ControlCenterView.swift       Settings window
   Widgets/
