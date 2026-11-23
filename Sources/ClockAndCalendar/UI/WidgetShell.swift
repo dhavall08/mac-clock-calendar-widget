@@ -14,6 +14,20 @@ enum WidgetShellMetrics {
         CGSize(width: rendered.width + insetSide * 2,
                height: rendered.height + insetTop + insetBottom)
     }
+
+    /// Where a locked widget still takes clicks: the toolbar strip above the
+    /// content, so the lock button stays reachable. Top-left origin, in window
+    /// points. Generous on purpose, the toolbar only shows once it's entered.
+    static func lockZone(inWindowOfSize size: CGSize) -> CGRect {
+        CGRect(x: size.width / 2 - 75, y: 8, width: 150, height: insetTop + 16)
+    }
+}
+
+/// Whether the pointer is over a locked widget's toolbar strip. The panel
+/// ignores the mouse everywhere else, so SwiftUI hover can't tell; the window
+/// controller tracks the pointer and sets this.
+final class PanelPointer: ObservableObject {
+    @Published var inLockZone = false
 }
 
 /// Chrome wrapped around every widget: glass background, hover toolbar and the
@@ -23,21 +37,40 @@ enum WidgetShellMetrics {
 /// scaled with `scaleEffect`. That keeps proportions identical at every size —
 /// a 3× calendar is the same design, just bigger, with vector-sharp text —
 /// instead of a layout that reflows and breaks as it grows.
+/// A drag that moves the panel. The offset is in screen points, y up.
+enum WindowDragPhase {
+    case began
+    case moved(CGSize)
+    case ended
+}
+
 struct WidgetShell: View {
     @ObservedObject var state: AppState
     let id: UUID
     let onOpenSettings: () -> Void
+    let onWindowDrag: (WindowDragPhase) -> Void
+    @ObservedObject var pointer: PanelPointer
 
     @ViewState private var isHovering = false
     @ViewState private var dragStartScale: Double?
+    // Both drags read the pointer in screen coordinates. A view's own
+    // coordinates move with the window while it is being moved or resized,
+    // which feeds the change back into the drag and makes it jitter.
+    @ViewState private var resizeStartMouse: CGPoint?
+    @ViewState private var moveStartMouse: CGPoint?
 
     private var chrome: WidgetChrome { state.chrome(for: id) }
     private var base: CGSize { state.baseSize(for: id) }
     private var scale: Double { chrome.scale }
     private var rendered: CGSize { state.renderedSize(for: id) }
+    /// A locked panel turns mouse events off and on under the pointer, which
+    /// can leave SwiftUI's hover stuck either way, so it uses the tracked zone.
+    private var showsToolbar: Bool { chrome.isLocked ? pointer.inLockZone : isHovering }
 
     var body: some View {
         widget
+            .contentShape(Rectangle())
+            .gesture(moveGesture)
             .overlay(alignment: .top) { toolbar }
             .overlay(alignment: .bottomTrailing) { resizeGrip }
             .padding(EdgeInsets(top: WidgetShellMetrics.insetTop,
@@ -46,7 +79,11 @@ struct WidgetShell: View {
                                 trailing: WidgetShellMetrics.insetSide))
             .frame(width: WidgetShellMetrics.windowSize(for: rendered).width,
                    height: WidgetShellMetrics.windowSize(for: rendered).height)
-            .animation(.easeOut(duration: 0.14), value: isHovering)
+            // Pin to the top-left, the corner the window keeps fixed. Centred,
+            // the content jumps for a frame whenever the window and the view
+            // finish resizing at slightly different times.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .animation(.easeOut(duration: 0.14), value: showsToolbar)
             .onHover { isHovering = $0 }
     }
 
@@ -109,8 +146,8 @@ struct WidgetShell: View {
                 .shadow(color: .black.opacity(0.45), radius: 8, y: 3)
         )
         .offset(y: -20)
-        .opacity(isHovering ? 1 : 0)
-        .allowsHitTesting(isHovering)
+        .opacity(showsToolbar ? 1 : 0)
+        .allowsHitTesting(showsToolbar)
     }
 
     // MARK: Resize grip
@@ -129,23 +166,58 @@ struct WidgetShell: View {
         }
         .frame(width: 22, height: 22)
         .offset(x: 13, y: 13)
-        .opacity(isHovering ? 1 : 0)
-        .allowsHitTesting(isHovering)
+        // A locked widget can't be resized, so its grip stays hidden.
+        .opacity(isHovering && !chrome.isLocked ? 1 : 0)
+        .allowsHitTesting(isHovering && !chrome.isLocked)
         .gesture(
             DragGesture(minimumDistance: 1)
-                .onChanged { value in
+                .onChanged { _ in
+                    let mouse = NSEvent.mouseLocation
                     let start = dragStartScale ?? scale
-                    if dragStartScale == nil { dragStartScale = start }
+                    let startMouse = resizeStartMouse ?? mouse
+                    if dragStartScale == nil {
+                        dragStartScale = start
+                        resizeStartMouse = mouse
+                    }
+                    // Screen y grows upward, so dragging down is a negative dy.
+                    let dx = mouse.x - startMouse.x
+                    let dy = startMouse.y - mouse.y
                     // Take the dominant axis so the drag tracks the pointer on a
                     // fixed-aspect widget in both directions.
-                    let delta = max(value.translation.width / base.width,
-                                    value.translation.height / base.height)
+                    let delta = max(dx / base.width, dy / base.height)
                     let next = min(max(start + delta, minScale), maxScale)
+                    // Skip sub-pixel changes so the window isn't re-laid out
+                    // for movements that don't change its size.
+                    guard abs(next - scale) * max(base.width, base.height) >= 0.5 else { return }
                     state.updateChrome(id, mutate { $0.scale = next })
                 }
-                .onEnded { _ in dragStartScale = nil }
+                .onEnded { _ in
+                    dragStartScale = nil
+                    resizeStartMouse = nil
+                }
         )
         .help("Drag to resize")
+    }
+
+    // MARK: Move
+
+    /// Drags the panel from anywhere on the widget. Buttons inside the widget
+    /// still win their own clicks, since a child's gesture beats this one.
+    private var moveGesture: some Gesture {
+        DragGesture(minimumDistance: 3)
+            .onChanged { _ in
+                let mouse = NSEvent.mouseLocation
+                guard let start = moveStartMouse else {
+                    moveStartMouse = mouse
+                    onWindowDrag(.began)
+                    return
+                }
+                onWindowDrag(.moved(CGSize(width: mouse.x - start.x, height: mouse.y - start.y)))
+            }
+            .onEnded { _ in
+                moveStartMouse = nil
+                onWindowDrag(.ended)
+            }
     }
 
     // MARK: Helper

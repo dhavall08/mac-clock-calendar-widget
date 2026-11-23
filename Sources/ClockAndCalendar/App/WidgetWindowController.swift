@@ -11,6 +11,8 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
 
     private let state: AppState
     private var panels: [UUID: WidgetPanel] = [:]
+    private var pointers: [UUID: PanelPointer] = [:]
+    private var mouseMonitors: [Any] = []
     private var cancellables: Set<AnyCancellable> = []
     /// Suppresses `windowDidMove` bookkeeping while we're the ones moving it.
     private var isApplyingGeometry = false
@@ -71,6 +73,24 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
         // anyway, but a display that was merely *slow* to be reported posts
         // nothing — so re-place everything once things have settled.
         scheduleScreenResync()
+
+        // A locked panel ignores the mouse, so it can't see the pointer coming
+        // to unlock it. Watch it from here instead: the global monitor sees
+        // moves over other apps (including through a click-through panel), the
+        // local one sees moves over our own windows. Mouse monitors need no
+        // Accessibility permission, only key monitors do.
+        let onMove: (NSEvent) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateLockedHitTesting() }
+        }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: onMove) {
+            mouseMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: { event in
+            onMove(event)
+            return event
+        }) {
+            mouseMonitors.append(local)
+        }
     }
 
     // MARK: Sync
@@ -102,19 +122,15 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
         for (id, panel) in panels where !live.contains(id) {
             panel.orderOut(nil)
             panels[id] = nil
+            pointers[id] = nil
         }
     }
 
     func sync(_ id: UUID) {
-        guard let instance = state.instance(id) else {
+        guard let instance = state.instance(id), instance.chrome.isVisible else {
             panels[id]?.orderOut(nil)
             panels[id] = nil
-            return
-        }
-
-        guard instance.chrome.isVisible else {
-            panels[id]?.orderOut(nil)
-            panels[id] = nil
+            pointers[id] = nil
             return
         }
 
@@ -126,16 +142,75 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
         let panel = WidgetPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 380))
         panel.delegate = self
         panel.identifier = NSUserInterfaceItemIdentifier(id.uuidString)
+        panel.acceptsMouseMovedEvents = true
+        let pointer = PanelPointer()
+        pointers[id] = pointer
 
-        let root = WidgetShell(state: state, id: id, onOpenSettings: { [weak self] in
-            self?.onOpenSettings?(id)
-        })
+        let root = WidgetShell(
+            state: state,
+            id: id,
+            onOpenSettings: { [weak self] in self?.onOpenSettings?(id) },
+            onWindowDrag: { [weak self] phase in self?.handleWindowDrag(phase, id: id) },
+            pointer: pointer
+        )
         let hosting = NSHostingView(rootView: AnyView(root))
+        // The controller owns the panel's frame. Left on, the hosting view also
+        // pushes min/max sizes onto the window from the SwiftUI layout, and the
+        // two fight during a resize.
+        hosting.sizingOptions = []
         hosting.autoresizingMask = [.width, .height]
         panel.contentView = hosting
 
         panels[id] = panel
         return panel
+    }
+
+    // MARK: Locked panels
+
+    /// Locked means "let clicks through to whatever is behind", except over the
+    /// toolbar strip, so the lock button can still unlock the widget. AppKit
+    /// can only make a whole window click-through, so this flips it as the
+    /// pointer crosses into and out of that strip.
+    private func updateLockedHitTesting() {
+        for (id, panel) in panels {
+            guard let chrome = state.instance(id)?.chrome else { continue }
+            updateHitTesting(panel, id: id, isLocked: chrome.isLocked)
+        }
+    }
+
+    private func updateHitTesting(_ panel: WidgetPanel, id: UUID, isLocked: Bool) {
+        let inZone = isLocked && lockZone(of: panel).contains(NSEvent.mouseLocation)
+        let ignores = isLocked && !inZone
+        if panel.ignoresMouseEvents != ignores { panel.ignoresMouseEvents = ignores }
+        if let pointer = pointers[id], pointer.inLockZone != inZone { pointer.inLockZone = inZone }
+    }
+
+    /// `WidgetShellMetrics.lockZone` in screen coordinates.
+    private func lockZone(of panel: NSWindow) -> CGRect {
+        let frame = panel.frame
+        let zone = WidgetShellMetrics.lockZone(inWindowOfSize: frame.size)
+        return CGRect(x: frame.minX + zone.minX, y: frame.maxY - zone.maxY,
+                      width: zone.width, height: zone.height)
+    }
+
+    // MARK: Moving
+
+    /// Top-left of each panel when its current drag started.
+    private var dragOrigins: [UUID: CGPoint] = [:]
+
+    /// Moves a panel under the pointer. `windowDidMove` sees the mouse button
+    /// held and records the result as a deliberate placement.
+    private func handleWindowDrag(_ phase: WindowDragPhase, id: UUID) {
+        guard let panel = panels[id], state.instance(id)?.chrome.isLocked == false else { return }
+        switch phase {
+        case .began:
+            dragOrigins[id] = CGPoint(x: panel.frame.minX, y: panel.frame.maxY)
+        case .moved(let offset):
+            guard let origin = dragOrigins[id] else { return }
+            panel.setFrameTopLeftPoint(CGPoint(x: origin.x + offset.width, y: origin.y + offset.height))
+        case .ended:
+            dragOrigins[id] = nil
+        }
     }
 
     private func apply(chrome: WidgetChrome, to panel: WidgetPanel, id: UUID) {
@@ -147,7 +222,7 @@ final class WidgetWindowController: NSObject, NSWindowDelegate {
         // panel left click-through because we returned before this line is the
         // one failure mode the user can't undo from the widget itself.
         panel.level = level(for: chrome.layer)
-        panel.ignoresMouseEvents = chrome.isLocked
+        updateHitTesting(panel, id: id, isLocked: chrome.isLocked)
 
         // The shell keeps a transparent margin for its toolbar, grip and glow.
         var size = WidgetShellMetrics.windowSize(for: state.renderedSize(for: id))

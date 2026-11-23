@@ -20,7 +20,10 @@ final class WidgetPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false           // the SwiftUI glass draws its own shadow + glow
-        isMovableByWindowBackground = true
+        // Moving is driven from the SwiftUI shell instead. NSHostingView doesn't
+        // let background drags through, so this never worked, and leaving it on
+        // risks a double move if a future SDK starts honouring it.
+        isMovableByWindowBackground = false
         ignoresMouseEvents = false
         animationBehavior = .none
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
