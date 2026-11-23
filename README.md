@@ -509,12 +509,14 @@ mode (`Package.swift`) so AppKit callbacks stay ergonomic.
 ### Releasing
 
 Bump `CFBundleShortVersionString` and `CFBundleVersion` in
-`Resources/Info.plist`, then:
+`Resources/Info.plist`, add the version to `CHANGELOG.md`, then:
 
 ```bash
 ./build.sh --zip
-gh release create v1.1.0 dist/ClockAndCalendar-1.1.0.zip --title "v1.1.0" --generate-notes
+gh release create v1.1.1 dist/ClockAndCalendar-1.1.1.zip --title "v1.1.1" --notes-file notes.md
 ```
+
+`notes.md` is that version's section copied from `CHANGELOG.md`.
 
 ---
 
